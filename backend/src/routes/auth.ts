@@ -4,7 +4,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { hashPassword, verifyPassword } from '../utils/passwordHash';
-import { generateAccessToken, generateRefreshToken, verifyRefreshTokenHash } from '../utils/jwt';
+import { generateAccessToken, generateRefreshToken } from '../utils/jwt';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();

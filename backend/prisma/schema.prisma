@@ -110,8 +110,6 @@ model User {
   patientProfile   PatientProfile?
   oauthToken       OauthToken?
   refreshTokens    RefreshToken[]
-  prescriptionsAsDoctor Prescription[] @relation("DoctorPrescriptions")
-  prescriptionsAsPatient  Prescription[] @relation("PatientPrescriptions")
   notifications    Notification[]
 
   @@map("users")
@@ -136,7 +134,7 @@ model DoctorProfile {
 
   // Relations
   user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  leaveDays   LeaveDay[]    @map("leave_days")
+  leaveDays   LeaveDay[]
   bookings    Booking[]     @relation("DoctorBookings")
   prescriptions Prescription[] @relation("DoctorPrescriptions")
 
@@ -182,6 +180,7 @@ model PatientProfile {
   bookings   Booking[]     @relation("PatientBookings")
   prescriptions Prescription[] @relation("PatientPrescriptions")
   medicationReminders MedicationReminder[]
+  symptomForms SymptomForm[]  // M1 schema fix: opposite of SymptomForm.patient
 
   @@map("patient_profiles")
 }
@@ -236,6 +235,7 @@ model SymptomForm {
   // Relations
   booking  Booking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   patient  PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  preVisitSummaries PreVisitSummary[]  // M1 schema fix: opposite of PreVisitSummary.symptomForm
 
   @@map("symptom_forms")
 }
@@ -349,6 +349,7 @@ model Notification {
   lastError         String?          @map("last_error")
   scheduledFor      DateTime         @default(now()) @map("scheduled_for")
   sentAt            DateTime?        @map("sent_at")
+  failedAt          DateTime?        @map("failed_at")
   createdAt         DateTime         @default(now()) @map("created_at")
 
   // Relations

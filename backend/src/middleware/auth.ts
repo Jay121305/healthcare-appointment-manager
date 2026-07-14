@@ -106,7 +106,7 @@ interface ResourceLoaderResult {
 type ResourceLoader = (req: Request) => Promise<ResourceLoaderResult | null>;
 
 export function requireOwnershipOrAdmin(loader: ResourceLoader) {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     if (!req.user) {
       res.status(401).json({ error: 'UNAUTHENTICATED' });
       return;
