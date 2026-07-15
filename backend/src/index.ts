@@ -10,6 +10,7 @@ import adminRouter from './routes/admin/doctors';
 import bookingRouter from './routes/booking/index';
 import visitsRouter from './routes/visits';
 import calendarRouter from './routes/calendar';
+import chatRouter from './routes/chat';
 
 // Validate environment variables
 validateEnv();
@@ -35,6 +36,8 @@ export function createApp(): express.Express {
   app.use('/bookings', bookingRouter);
   app.use('/visits', visitsRouter);
   app.use('/calendar', calendarRouter);
+  app.use('/chat', chatRouter);
+  app.use('/chat', chatRouter);
 
   // 404 handler
   app.use((_req, res) => {

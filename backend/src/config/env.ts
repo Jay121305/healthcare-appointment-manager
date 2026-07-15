@@ -42,6 +42,9 @@ export function validateEnv(): void {
   if (!process.env.EMAIL_DAILY_CAP) {
     process.env.EMAIL_DAILY_CAP = '100';
   }
+  if (!process.env.FOLLOW_UP_MAX_PER_BOOKING) {
+    process.env.FOLLOW_UP_MAX_PER_BOOKING = '5';
+  }
 }
 
 export const env = {
@@ -58,4 +61,5 @@ export const env = {
   emailFromAddress: process.env.EMAIL_FROM_ADDRESS!,
   emailDailyCap: parseInt(process.env.EMAIL_DAILY_CAP || '100', 10),
   upstashRedisUrl: process.env.UPSTASH_REDIS_TLS_URL!,
+  followUpMaxPerBooking: parseInt(process.env.FOLLOW_UP_MAX_PER_BOOKING || '5', 10),
 };

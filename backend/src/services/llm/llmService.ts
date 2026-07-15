@@ -23,7 +23,7 @@ function getLlmConfig(): LlmServiceConfig {
   return {
     apiKey: process.env.NVIDIA_NIM_API_KEY!,
     baseURL: process.env.NVIDIA_NIM_BASE_URL || 'https://integrate.api.nvidia.com/v1',
-    model: process.env.NVIDIA_NIM_MODEL || 'meta/llama-3.1-70b-instruct',
+    model: process.env.NVIDIA_NIM_MODEL || 'z-ai/glm-5.2',
     timeoutMs: parseInt(process.env.NVIDIA_NIM_TIMEOUT_MS || '30000', 10),
     maxRetries: 1, // Exactly one retry per Rule 5
     backoffMs: 2000,
@@ -216,6 +216,86 @@ async function callNimWithRetry<T>(
   return {
     data: { fallback: true } as T, // Will be replaced with actual fallback text in callers
     retryCount: config.maxRetries,
+    status: LlmStatus.FALLBACK,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Follow-up Q&A — single-turn answer anchored on stored post-visit summary
+// Plain text reply (no JSON schema), persisted as ChatMessage rows.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FOLLOWUP_SYSTEM_PROMPT = `You are a health-literacy assistant answering a patient's follow-up questions about their recent visit summary. You must:
+- Only use information present in the provided visit summary and notes.
+- If the answer is not in the provided context, say so honestly — do not invent medical facts, diagnoses, or dosages.
+- Keep replies concise, plain-language, and patient-friendly.
+- Never reference other patients' data or speculate about the patient's identity.
+- If the question is urgent or suggests an emergency, advise the patient to contact their clinic or emergency services.
+
+Visit summary context:
+{context}`;
+
+export const FOLLOWUP_MAX_TOKENS = 600;
+
+export async function generateFollowUpAnswer(args: {
+  bookingId: string;
+  question: string;
+  contextSummary: string;
+  history: { role: 'user' | 'assistant'; content: string }[];
+}): Promise<{ answer: string; status: LlmStatus }> {
+  const config = getLlmConfig();
+  const client = getNimClient(config);
+
+  const systemContent = FOLLOWUP_SYSTEM_PROMPT.replace('{context}', args.contextSummary);
+
+  const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+    { role: 'system', content: systemContent },
+    ...args.history.map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user', content: args.question },
+  ];
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
+    try {
+      const response = await client.chat.completions.create({
+        model: config.model,
+        messages,
+        temperature: 0.3,
+        max_tokens: FOLLOWUP_MAX_TOKENS,
+      });
+
+      const rawContent = response.choices[0]?.message?.content;
+      if (!rawContent) {
+        throw new Error('Empty response from NIM');
+      }
+
+      const answer = rawContent.trim();
+
+      // Persist the user question + assistant answer
+      await prisma.chatMessage.createMany({
+        data: [
+          { bookingId: args.bookingId, role: 'user', content: args.question },
+          { bookingId: args.bookingId, role: 'assistant', content: answer },
+        ],
+      });
+
+      await prisma.booking.update({
+        where: { id: args.bookingId },
+        data: { followUpMessageCount: { increment: 1 } },
+      });
+
+      return { answer, status: LlmStatus.GENERATED };
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt === config.maxRetries) break;
+      await sleep(config.backoffMs);
+    }
+  }
+
+  console.error('[LLM] Follow-up failed, using fallback:', lastError?.message);
+  return {
+    answer: 'Sorry, I could not generate an answer right now. Please try again shortly, or contact the clinic if urgent.',
     status: LlmStatus.FALLBACK,
   };
 }

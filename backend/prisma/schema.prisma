@@ -208,6 +208,8 @@ model Booking {
   calendarEvent        CalendarEvent?
   prescriptions        Prescription[]
   notifications        Notification[]
+  chatMessages         ChatMessage[]
+  followUpMessageCount Int       @default(0) @map("follow_up_message_count")
 
   // Rule 2: Partial unique index — cancelled/completed rows don't block slot reuse
   @@unique([doctorId, bookingDate, startTime], name: "unique_doctor_slot_active")
@@ -425,4 +427,22 @@ model RefreshToken {
 
   @@index([userId, revokedAt])
   @@map("refresh_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHAT_MESSAGES — follow-up Q&A on a post-visit summary
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  bookingId String   @map("booking_id")
+  role      String   // "user" | "assistant" | "system"
+  content   String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId, createdAt])
+  @@map("chat_messages")
 }

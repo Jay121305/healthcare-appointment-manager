@@ -26,6 +26,9 @@ import type {
   CalendarStatusResponse,
   CancelBookingResult,
   CreateDoctorInput,
+  ChatMessage,
+  ChatMessageRequest,
+  GetChatMessagesResponse,
   DoctorPublicDTO,
   DoctorWithUser,
   LeaveDaysResponse,
@@ -34,8 +37,10 @@ import type {
   PaginatedResponse,
   PlaceHoldInput,
   PlaceHoldResult,
-  PreVisitSummaryResponse,
+  PostChatMessageResponse,
   PostVisitSummaryResponse,
+  PreVisitSummaryResponse,
+  RegenerateSummaryResponse,
   RescheduleBookingResult,
   RescheduleInput,
   SlotAvailabilityResponse,
@@ -378,6 +383,20 @@ export const api = {
     fetchJson<MarkLeaveResult>(`/admin/doctors/${encodeURIComponent(doctorId)}/leave`, {
       method: 'POST',
       body: JSON.stringify(input),
+    }),
+
+  // Chat (follow-up Q&A)
+  getChatMessages: (bookingId: string) =>
+    fetchJson<GetChatMessagesResponse>(`/chat/${encodeURIComponent(bookingId)}/messages`, { method: 'GET' }),
+  postChatMessage: (bookingId: string, input: ChatMessageRequest) =>
+    fetchJson<PostChatMessageResponse>(`/chat/${encodeURIComponent(bookingId)}/message`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  regenerateSummary: (bookingId: string) =>
+    fetchJson<RegenerateSummaryResponse>(`/chat/${encodeURIComponent(bookingId)}/regenerate`, {
+      method: 'POST',
+      body: '{}',
     }),
 };
 

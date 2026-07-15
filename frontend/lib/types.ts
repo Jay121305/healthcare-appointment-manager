@@ -295,6 +295,39 @@ export interface PostVisitSummaryResponse {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Chat / Follow-up Q&A
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  createdAt: string;
+}
+
+export interface GetChatMessagesResponse {
+  bookingId: string;
+  messages: ChatMessage[];
+  followUpCount: number;
+  remainingQuestions: number;
+  maxQuestions: number;
+}
+
+export interface PostChatMessageResponse {
+  answer: string;
+  status: LlmStatus;
+  remainingQuestions: number;
+  maxQuestions: number;
+}
+
+export interface RegenerateSummaryResponse {
+  message: string;
+  bookingId: string;
+  llmStatus: LlmStatus;
+  maxQuestions?: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Calendar
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -346,6 +379,42 @@ export interface MarkLeaveResult {
 
 export interface LeaveDaysResponse {
   leaveDays: { leaveDate: string; reason: string | null }[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chat (follow-up Q&A on post-visit summary)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  createdAt: string;
+}
+
+export interface ChatMessagesResponse {
+  bookingId: string;
+  messages: ChatMessage[];
+  followUpCount: number;
+  remainingQuestions: number;
+  maxQuestions: number;
+}
+
+export interface ChatMessageRequest {
+  question: string;
+}
+
+export interface ChatMessageResponse {
+  answer: string;
+  llmStatus: LlmStatus;
+  remainingQuestions: number;
+  maxQuestions: number;
+}
+
+export interface RegenerateSummaryResponse {
+  message: string;
+  bookingId: string;
+  llmStatus: LlmStatus;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

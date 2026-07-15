@@ -10,6 +10,7 @@ import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/authContext';
 import { Card, CardHeader, CardBody, SpinnerScreen, Badge, ErrorBanner } from '@/components/ui/Misc';
 import type { PostVisitSummaryResponse } from '@/lib/types';
+import { SummaryChat } from '@/components/shared/SummaryChat';
 
 export default function DoctorSummaryPage() {
   const params = useParams();
@@ -30,38 +31,12 @@ export default function DoctorSummaryPage() {
   if (!summary) return <ErrorBanner title="Not found" message="Post-visit summary not yet generated." />;
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold text-gray-900">Post-Visit Summary (Doctor View)</h1>
-        <p className="text-sm text-gray-500">Generated {formatDateTime(summary.generatedAt ?? new Date())}</p>
-      </div>
-
-      <Card className={cn(summary.llmStatus === 'FALLBACK' && 'border-amber-200 bg-amber-50')}>
-        <CardHeader className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-900">Patient-Facing Summary</h2>
-          <Badge className={llmStatusBadgeClass(summary.llmStatus)}>{llmStatusVerb(summary.llmStatus)}</Badge>
-        </CardHeader>
-        <CardBody className="space-y-2">
-          <p className="text-gray-700 whitespace-pre-wrap">{summary.summaryText}</p>
-          {summary.llmStatus === 'FALLBACK' && (
-            <div className="border border-amber-300 bg-amber-50 rounded-md p-3 text-sm text-amber-900 mt-2">
-              <p className="font-semibold">AI summary unavailable</p>
-              <p className="mt-1">This is a standard fallback summary. The AI service was unable to generate a personalized summary.</p>
-            </div>
-          )}
-        </CardBody>
-      </Card>
-
-      {summary.doctorNotes && (
-        <Card className="border-blue-200 bg-blue-50">
-          <CardHeader>
-            <h2 className="text-sm font-semibold text-gray-900">Your Raw Notes (Doctor Only)</h2>
-          </CardHeader>
-          <CardBody>
-            <p className="text-gray-700 whitespace-pre-wrap">{summary.doctorNotes}</p>
-          </CardBody>
-        </Card>
-      )}
-    </div>
+    <SummaryChat
+      bookingId={bookingId}
+      initialSummary={summary.summaryText}
+      isDoctor={true}
+      initialLlmStatus={summary.llmStatus}
+      doctorNotes={summary.doctorNotes ?? ''}
+    />
   );
 }
