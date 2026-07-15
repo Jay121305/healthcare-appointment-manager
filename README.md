@@ -1,259 +1,288 @@
 # Healthcare Appointment & Follow-up Manager
 
-A full-stack appointment booking, pre/post-visit LLM summarisation, email
-notification, medication reminder, and Google Calendar sync system for a
-three-portal (patient / doctor / admin) healthcare app. Built entirely on
-permanent free-tier services — no paid plans anywhere.
+> A production-grade, full-stack clinic platform with separate portals for patients, doctors, and admins — featuring AI-generated pre/post-visit summaries, concurrent-safe slot booking, async email notifications, and Google Calendar sync. Runs entirely on permanent free-tier infrastructure.
 
-## Stack (locked)
+**Live Demo → `https://healthcare-appointment-manager-two.vercel.app`**  
+**Backend API → `https://healthcare-backend-dz7o.onrender.com`**
 
-| Layer | Tech | Hosting (all free) |
-|---|---|---|
-| Frontend | Next.js 14 App Router + TS strict + Tailwind 3 + `@tanstack/react-query@5` | Vercel Hobby |
-| Backend  | Node + Express + TS | Render free Web Service |
-| DB      | PostgreSQL via Prisma | Neon (scale-to-zero) |
-| Queue   | Redis + BullMQ via ioredis TCP/TLS | Upstash (256 MB / 500 K cmd per mo) |
-| Auth    | Self-implemented JWT (HS256, 15-min access + 7-day rotating refresh) | — |
-| Email   | Resend SDK (3000/mo, 100/day) | Resend free |
-| Calendar | Google Calendar API v3 + OAuth 2.0 via `googleapis@^144` | Google Cloud (free) |
-| LLM     | NVIDIA NIM (OpenAI-compatible `openai` SDK at `https://integrate.api.nvidia.com/v1`) | NVIDIA free tier (~40 req/min) |
+Seed accounts for evaluators:
+| Role    | Email                      | Password        |
+|---------|----------------------------|-----------------|
+| Admin   | admin@healthcare.local     | AdminPass123!   |
+| Doctor  | doctor@healthcare.local    | DoctorPass123!  |
+| Patient | patient@healthcare.local   | PatientPass123! |
 
-## Repo layout
+> ⚠️ Backend is hosted on Render's free tier — first request after idle may take 30–60s to cold-start.
+
+---
+
+## Screenshots
+
+**Landing Page**
+
+![Landing Page](docs/screenshots/landing.png)
+
+**Sign In**
+
+![Sign In](docs/screenshots/signin.png)
+
+**Patient Sign Up**
+
+![Patient Sign Up](docs/screenshots/patient-signup.png)
+
+**Doctor Sign In**
+
+![Doctor Sign In](docs/screenshots/doctor-signin.png)
+
+---
+
+## What This Project Demonstrates
+
+This is not a basic CRUD app. The key engineering decisions are:
+
+| Problem | Solution |
+|---|---|
+| **Concurrent double-booking** | DB partial unique index `WHERE status IN ('CONFIRMED','RESCHEDULED')` inside `prisma.$transaction` — application-level checks are not the guard |
+| **Doctor leave conflicts** | Two-phase `dryRun` preview before commit — admin sees affected patients before any side effects happen |
+| **Slot hold / race conditions** | Redis TTL hold (`SET NX EX`) for UX, DB constraint for correctness — hold is never the sole guard |
+| **Notification reliability** | BullMQ queue → 3× exponential retry → `DEAD` state with `failedAt` timestamp; booking is never blocked by email |
+| **LLM failure isolation** | 1 retry + neutral fallback text stored in DB; booking confirm never awaits LLM |
+| **Calendar sync isolation** | Calendar events created/deleted in a separate BullMQ worker post-commit; OAuth token revocation handled gracefully |
+
+---
+
+## Tech Stack
+
+| Layer | Tech | Hosting |
+|-------|------|---------|
+| Frontend | Next.js 14 App Router + TypeScript + Tailwind 3 | Vercel Hobby (free) |
+| Backend | Node.js + Express + TypeScript | Render free Web Service |
+| Database | PostgreSQL + Prisma ORM | Neon (permanent free tier) |
+| Queue / Cache | Redis + BullMQ | Upstash (free, 500K cmd/mo) |
+| Auth | Self-implemented JWT (HS256 access + rotating refresh) | — |
+| Email | Resend SDK | Resend free (3K/mo) |
+| Calendar | Google Calendar API v3 + OAuth 2.0 | Google Cloud (free) |
+| LLM | NVIDIA NIM (OpenAI-compatible endpoint) | NVIDIA free tier (~40 req/min) |
+
+---
+
+## Repository Structure
 
 ```
 .
-├── backend/                # Express + Prisma + BullMQ workers
+├── backend/
 │   ├── prisma/
-│   │   ├── schema.prisma   # 13 models, 10 enums — see "DB Schema" below
-│   │   ├── seed.ts         # bootstrap admin / doctor / patient accounts
+│   │   ├── schema.prisma              # 13 models, 10 enums
+│   │   ├── seed.ts                    # Bootstrap admin/doctor/patient accounts
 │   │   └── migrations/
-│   │       └── 001_add_partial_unique_index/migration.sql   # Rule 2 (manual SQL, not tracked by Prisma)
-│   ├── src/
-│   │   ├── config/         # env, prisma client, redis client, queue names
-│   │   ├── middleware/     # authenticate, requireRoles, requireOwnershipOrAdmin
-│   │   ├── routes/         # auth, booking, admin/doctors, calendar, visits
-│   │   ├── services/
-│   │   │   ├── booking/    # bookingService.ts (Rule 2, 3, 4)
-│   │   │   ├── llm/        # llmService.ts + nimClient.ts (Rule 5)
-│   │   │   ├── calendar/   # calendarService.ts + oauthService.ts + encryption.ts (Rule 8)
-│   │   │   ├── notification/ # notificationService.ts (templates)
-│   │   │   ├── leaveService.ts     # Rule 3
-│   │   │   ├── slotService.ts      # Rule 4 (live slots + advisory hold check)
-│   │   │   ├── doctorService.ts
-│   │   │   └── medicationScheduler.ts  # Rule 7
-│   │   ├── workers/        # 7 BullMQ workers (email, preVisit, postVisit,
-│   │   │                  #   reminderScan, medicationReminder, medicationExpansion,
-│   │   │                  #   calendarSync)
-│   │   ├── utils/          # jwt.ts, passwordHash.ts (argon2id)
-│   │   └── index.ts        # createApp() factory + bootstrap() runner
-│   └── tests/              # M8 Jest+Supertest suite (7 specs / 36 tests)
+│   │       └── 001_add_partial_unique_index/migration.sql  # Rule 2 enforcement
+│   └── src/
+│       ├── config/                    # Env, Prisma client, Redis client, queue names
+│       ├── middleware/                # authenticate, requireRoles, requireOwnershipOrAdmin
+│       ├── routes/                    # auth, booking, admin/doctors, calendar, visits
+│       ├── services/
+│       │   ├── booking/bookingService.ts   # Core booking engine (double-booking, hold, confirm)
+│       │   ├── llm/llmService.ts           # NVIDIA NIM client + retry/fallback
+│       │   ├── calendar/                   # OAuth, token encryption, Calendar API
+│       │   ├── leaveService.ts             # Two-phase leave conflict detection
+│       │   ├── slotService.ts              # Live slot computation (never pre-materialized)
+│       │   └── medicationScheduler.ts      # Prescription → reminder timestamp parser
+│       ├── workers/                   # 7 BullMQ workers
+│       │   ├── emailWorker.ts         # email-notification queue, 3× retry, DEAD state
+│       │   ├── preVisitSummaryWorker.ts
+│       │   ├── postVisitSummaryWorker.ts
+│       │   ├── reminderScanWorker.ts  # Hourly scan for upcoming appointments
+│       │   ├── medicationReminderWorker.ts
+│       │   ├── medicationExpansionWorker.ts
+│       │   └── calendarSyncWorker.ts
+│       └── tests/                     # M8: 7 specs / 36 tests (Jest + Supertest, real DB)
 │
-├── frontend/               # Next.js 14 App Router — 23 pages, 3 portals
+├── frontend/
 │   └── app/
-│       ├── (public)/       # /login /signup/patient
-│       ├── patient/        # /patient/dashboard /patient/doctors /patient/book/[doctorId]
-│       ├── doctor/         # /doctor/dashboard /doctor/appointments/[id]/notes
-│       ├── admin/          # /admin/dashboard /admin/doctors/[id]/leave/new
-│       └── middleware.ts   # Edge role-cookie redirect (non-authoritative)
+│       ├── (public)/                  # /login, /signup/patient
+│       ├── patient/                   # Dashboard, doctor search, booking flow, summaries
+│       ├── doctor/                    # Dashboard, appointments, post-visit notes
+│       └── admin/                     # Doctor CRUD, leave management, conflict resolution UI
 │
-├── PROJECT_STATE.md        # cross-module ledger — READ BEFORE STARTING ANY MODULE
-└── .env.example            # see "Environment variables" below
+├── SYSTEM_DESIGN.md                   # 788-word technical write-up (required deliverable)
+├── PROJECT_STATE.md                   # Cross-module build ledger with regression guarantees
+└── .env.example                       # All 22 environment variables with descriptions
 ```
 
-## Setup — local dev
+---
+
+## Local Setup
+
+### Prerequisites
+- Node.js 18+
+- Accounts on: [Neon](https://neon.tech), [Upstash](https://upstash.com), [Resend](https://resend.com), [NVIDIA NGC](https://build.nvidia.com)
+- Google Cloud project with Calendar API enabled (see [Google Calendar OAuth Setup](#google-calendar-oauth-setup))
+
+### Steps
 
 ```bash
-# 1. Clone & install
-git clone <repo-url> healthcare-app && cd healthcare-app
-cd backend  && npm install
+# 1. Clone and install
+git clone https://github.com/Jay121305/healthcare-appointment-manager
+cd healthcare-appointment-manager
+cd backend && npm install
 cd ../frontend && npm install
 
-# 2. Provision the three free-tier services
-#    Neon:    create a DB, copy the connection string with ?sslmode=require
-#    Upstash: create a DB, copy the "Endpoint" + "Token" → rediss://default:TOKEN@HOST:6379
-#    Resend:  verify your sending domain, copy re_... API key
-#    NVIDIA:  create a NVIDIA NGC account, generate an NIM API key (nvapi-…)
-#    Google:  see "Google Calendar OAuth setup" below — needs CLIENT_ID, SECRET, REDIRECT_URI
-
-# 3. Generate JWT secrets + OAuth encryption key
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"     # JWT_ACCESS_SECRET
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"     # JWT_REFRESH_SECRET
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"  # OAUTH_TOKEN_ENC_KEY
-
-# 4. Configure env (single canonical .env.example at repo root)
+# 2. Configure environment
 cp .env.example backend/.env
-# edit backend/.env with the values from steps 2-3
+# Edit backend/.env with your service credentials (see Environment Variables section)
 
+# 3. Generate JWT secrets
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"     # → JWT_ACCESS_SECRET
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"     # → JWT_REFRESH_SECRET
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"  # → OAUTH_TOKEN_ENC_KEY
+
+# 4. Push schema and seed demo accounts
 cd backend
-npm run db:generate     # prisma generate
-npm run db:push         # prisma db push (creates all 18 tables on Neon)
+npm run db:generate   # prisma generate
+npm run db:push       # Creates all tables on Neon
 
-# 5. Apply the partial-unique-index migration (manual — not tracked by Prisma)
-# The schema's @@unique is non-partial; R1 migration in
-# prisma/migrations/001_add_partial_unique_index/migration.sql must be run
-# once against Neon so cancelled rows stop blocking slot reuse.
-# Run from backend/:
+# 5. Apply the partial-unique-index migration (manual SQL, run once)
 psql "$DATABASE_URL" -f prisma/migrations/001_add_partial_unique_index/migration.sql
 
-# 6. Seed demo accounts (admin / doctor / patient)
+# 6. Seed demo accounts
 npm run db:seed
 
-# 7. Run
-npm run dev             # backend on :3001 via tsx watch src/index.ts
-#    in another terminal:
-cd ../frontend && npm run dev   # Next.js on :3000
+# 7. Start both servers
+npm run dev           # backend on :3001
+# In a separate terminal:
+cd ../frontend && npm run dev   # frontend on :3000
 ```
 
-Open http://localhost:3000 → login with `admin@healthcare.local / AdminPass123!`.
+Open http://localhost:3000 and sign in with `admin@healthcare.local / AdminPass123!`
 
-## Deploy — Vercel + Render (free)
+---
 
-**Backend (Render)**:
-1. New Web Service → connect repo → root `backend/` → build `npm install && npm run build` → start `npm start`
-2. Render's dashboard "Environment" tab — paste every var from `backend/.env`.
-   Set `FRONTEND_URL=https://your-frontend.vercel.app` and
-   `GOOGLE_OAUTH_REDIRECT_URI=https://your-backend.onrender.com/calendar/callback`.
-3. Render free tier spins down after 15 min idle (cold start 30-60s). BullMQ
-   workers (RemindScan, MedicationExpansion) run on the *same* process as
-   the Express server, so they pause during spin-down — accepted.
+## Deploy to Vercel + Render (free)
 
-**Frontend (Vercel)**:
-1. New Project → connect repo → root `frontend/`
+**Backend (Render)**
+1. New Web Service → connect repo → root directory: `backend/` → build: `npm install && npm run build` → start: `npm start`
+2. Add all variables from `backend/.env` in Render's Environment tab
+3. Set `FRONTEND_URL=https://your-frontend.vercel.app` and `GOOGLE_OAUTH_REDIRECT_URI=https://your-backend.onrender.com/calendar/callback`
+4. Apply the partial-unique-index migration against your Neon DB (same `psql` command from step 5 above)
+
+**Frontend (Vercel)**
+1. New Project → connect repo → root directory: `frontend/`
 2. Set `NEXT_PUBLIC_API_URL=https://your-backend.onrender.com`
-3. Deploy. 15 static + 7 dynamic routes, 26.7 kB middleware.
+3. Deploy
 
-**DB (Neon)**: apply the partial-unique-index migration (Step 5 above) against
-the Neon branch's `DATABASE_URL` so cancelled/completed bookings stop blocking
-slot reuse. Without this, the schema's non-partial `@@unique` keeps cancelled
-rows in the index.
+---
 
-## Environment variables
+## Environment Variables
 
-Every variable is documented in `.env.example` at the repo root — see that
-file for one-line descriptions, defaults, and where it is consumed in source.
+Full reference is in `.env.example`. Key variables:
 
-Categories:
-- Neon: `DATABASE_URL`
-- Upstash: `UPSTASH_REDIS_TLS_URL`
-- JWT: `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`
-- NIM: `NVIDIA_NIM_API_KEY`, `NVIDIA_NIM_MODEL`, optional `NVIDIA_NIM_BASE_URL`, `NVIDIA_NIM_TIMEOUT_MS`
-- Resend: `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS`, optional `EMAIL_DAILY_CAP`
-- Google: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, `OAUTH_TOKEN_ENC_KEY`, optional `CALENDAR_WORKER_CONCURRENCY`, `FRONTEND_OAUTH_RETURN_URL`
-- Booking tunables: `BOOKING_HOLD_TTL_SECONDS`, `BOOKING_CANCEL_CUTOFF_HOURS`, `APP_TZ`
-- App: `NODE_ENV`, `PORT`, `FRONTEND_URL`
-- Frontend: `NEXT_PUBLIC_API_URL` (primary; `NEXT_PUBLIC_API_BASE_URL` legacy fallback)
-- Test-only: `TEST_ADMIN_EMAIL`, `TEST_ADMIN_PASSWORD`
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | Neon PostgreSQL connection string (include `?sslmode=require`) |
+| `UPSTASH_REDIS_TLS_URL` | Upstash Redis TLS URL (`rediss://default:TOKEN@HOST:6379`) |
+| `JWT_ACCESS_SECRET` | 32-byte hex secret for access tokens |
+| `JWT_REFRESH_SECRET` | 32-byte hex secret for refresh tokens |
+| `NVIDIA_NIM_API_KEY` | NVIDIA NGC API key (`nvapi-…`) |
+| `NVIDIA_NIM_MODEL` | Model to use (e.g. `meta/llama-3.1-70b-instruct`) |
+| `RESEND_API_KEY` | Resend API key (`re_…`) |
+| `EMAIL_FROM_ADDRESS` | Verified sender email for notifications |
+| `GOOGLE_OAUTH_CLIENT_ID` | GCP OAuth 2.0 Client ID |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | GCP OAuth 2.0 Client Secret |
+| `GOOGLE_OAUTH_REDIRECT_URI` | Must match exactly: `http://localhost:3001/calendar/callback` for dev |
+| `OAUTH_TOKEN_ENC_KEY` | 32-byte base64 key for AES-256-GCM OAuth token encryption |
+| `NEXT_PUBLIC_API_URL` | Backend URL (frontend env var) |
 
-Known drift (tracked in PROJECT_STATE.md I-issue):
-- `EMAIL_WORKER_CONCURRENCY` is documented in .env.example but NOT honoured by
-  `emailWorker.ts` (hardcoded `concurrency: 3` on line 154). Leaving the var
-  in .env.example with a comment; a follow-up PR should either wire it or drop it.
+---
 
-## API docs
+## API Reference
 
-`authenticate` = JWT Bearer header; `requireRoles(...)` enforces one of the
-three roles server-side (Rule 1). Ownership of the `(bookingId)` resource is
-re-checked at the service layer against `booking.patient.user.id` /
-`booking.doctor.user.id` for cancel/reschedule.
+`authenticate` = JWT Bearer header required. `requireRoles(...)` = server-side role enforcement.
 
 ### Auth (`/auth`)
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/auth/signup/patient` | Public | Patient self-registration |
+| POST | `/auth/login` | Public | Returns `{accessToken, refreshToken, user}` |
+| POST | `/auth/refresh` | Public | Rotates refresh token (reuse detection) |
+| POST | `/auth/logout` | JWT | Invalidates refresh token family |
+| GET | `/auth/me` | JWT | Current user profile |
 
-| Method | Path | Auth |
-|---|---|---|
-| POST   | /auth/signup/patient | PUBLIC (open patient self-signup) |
-| POST   | /auth/signup/doctor  | PUBLIC — seed-only convenience; production creates doctors via `POST /admin/doctors` |
-| POST   | /auth/login          | PUBLIC — returns `{accessToken, refreshToken, user}` |
-| POST   | /auth/refresh        | PUBLIC — body `{refreshToken}`; rotates refresh token, detects reuse |
-| POST   | /auth/logout         | JWT — invalidates the refresh token family |
-| GET    | /auth/me             | JWT — returns the current user's profile |
+### Bookings (`/bookings`)
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/bookings/slots` | JWT | Live-computed available slots for a doctor on a date |
+| POST | `/bookings/holds` | JWT PATIENT | Place a 5-min Redis TTL hold on a slot |
+| POST | `/bookings/:holdToken/symptom-form` | JWT PATIENT | Attach symptom form before confirm (Rule 4) |
+| POST | `/bookings/:holdToken/confirm` | JWT PATIENT | Confirm booking — DB unique constraint enforced inside `$transaction` |
+| POST | `/bookings/:bookingId/cancel` | JWT PATIENT/DOCTOR/ADMIN | Cancel; email + calendar delete fire async |
+| POST | `/bookings/:bookingId/reschedule` | JWT PATIENT/DOCTOR/ADMIN | Reschedule; new Booking row created |
 
-### Booking (`/bookings`)
-
-| Method | Path | Auth | Notes |
-|---|---|---|---|
-| GET    | /bookings/slots | JWT | Query `doctorId`, `date` (YYYY-MM-DD). Returns the M2 live-computed slot grid with `available` flag per slot. |
-| POST   | /bookings/holds | JWT PATIENT | Body `{doctorId, date, startTime, ttlSeconds?}`. Requires available slot, creates Redis hold `bh:{doctorId}:{dateIso}:{startTimeIso}` with NX + EX. Returns `{holdToken}`. |
-| POST   | /bookings/:holdToken/symptom-form | JWT PATIENT | Final step before confirm (Rule 4). Body `{primaryComplaint, durationDays?, severity?, description?, currentMedications?, allergies?}`. Stored in Redis under `form:{holdToken}` until confirm. |
-| POST   | /bookings/:holdToken/confirm | JWT PATIENT | Inside a `prisma.$transaction`: writes the Booking+SymptomForm+PreVisitSummary(PENDING) atomically; the DB partial unique index rejects duplicates with 409 SLOT_ALREADY_BOOKED (Rule 2). After tx commit, fires async triggers (LLM/email/calendar) `void` and un-awaited (Rule 4). |
-| POST   | /bookings/:bookingId/cancel | JWT PATIENT,DOCTOR,ADMIN | Service-level ownership check (admin initiator rejected — documented gap I2(M4)). Body `{reason?}`. Booking row kept (status=CANCELLED); email + calendar delete fire async. |
-| POST   | /bookings/:bookingId/reschedule | JWT PATIENT,DOCTOR,ADMIN | Same ownership rule. Body `{newDate, newStartTime}`. Old booking → RESCHEDULED, new booking row created. Email + calendar fire async as delete-old + create-new (Rule 8). |
-
-### Admin (`/admin/doctors`) — every route requires JWT ADMIN
-
-| Method | Path | Notes |
-|---|---|---|
-| POST   | /admin/doctors              | create doctor profile (email, password, fullName, specialisation, workingHours, slotDurationMinutes, phone) |
-| GET    | /admin/doctors?search=&specialisation=  | paginated list |
-| GET    | /admin/doctors/:id           | full profile |
-| PUT    | /admin/doctors/:id           | edit profile / working-hours / soft-delete flag |
-| DELETE | /admin/doctors/:id           | soft delete — rejects with `UPCOMING_BOOKINGS_EXIST` if active bookings remain |
-| GET    | /admin/doctors/:id/slots     | slot preview for the admin UI |
-| POST   | /admin/doctors/:id/leave     | Rule 3 endpoint. Body `{rangeStart, rangeEnd, reason?, dryRun, conflictResolution}`. `dryRun=true` returns the conflict list with zero side effects (PREVIEW); `dryRun=false` with `conflictResolution='AUTO_CANCEL'` atomically inserts the `LeaveDay` row, sets conflicting bookings to CANCELLED, and enqueues notifications to every affected patient + doctor notice. |
-| GET    | /admin/doctors/:id/leave     | list leave days |
-| DELETE | /admin/doctors/:id/leave/:leaveId | delete a leave day |
+### Admin — Doctor Management (`/admin/doctors`) — ADMIN only
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/admin/doctors` | Create doctor profile |
+| GET | `/admin/doctors` | List doctors (search by specialisation) |
+| PUT | `/admin/doctors/:id` | Update profile, working hours |
+| DELETE | `/admin/doctors/:id` | Soft delete (rejected if upcoming bookings exist) |
+| POST | `/admin/doctors/:id/leave` | Mark leave — `dryRun=true` returns conflict list with zero side effects; `dryRun=false` + `conflictResolution=AUTO_CANCEL` atomically cancels bookings + enqueues patient notifications |
+| GET | `/admin/doctors/:id/leave` | List leave days |
+| DELETE | `/admin/doctors/:id/leave/:leaveId` | Remove a leave day |
 
 ### Visits (`/visits`)
-
-| Method | Path | Auth | Notes |
-|---|---|---|---|
-| POST   | /visits/:bookingId/notes   | JWT DOCTOR | Body `{notes}`. Upserts PostVisitSummary in PENDING, queues an LLM job on the `post-visit-summary` queue, and (Rule 7) parses prescription frequency strings from the DB `prescriptions` table → creates `medication_reminders` rows + delayed BullMQ jobs. **Prescriptions are read from the DB, NOT from the request body.** |
-| GET    | /visits/:bookingId/summary | JWT PATIENT,DOCTOR | Returns the PostVisitSummary for the booking. Response shape: `{bookingId, summaryText, llmStatus, retryCount, generatedAt, doctorNotes?}` (doctor-only sees raw `doctorNotes`). **Note:** frontend `api.getPostVisitSummary` calls `/visits/:id/post-summary` (plural suffix) — **this 404s**; the real endpoint is `/visits/:bookingId/summary`. |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/visits/:bookingId/notes` | JWT DOCTOR | Submit post-visit notes; triggers LLM summary + medication reminders |
+| GET | `/visits/:bookingId/summary` | JWT PATIENT/DOCTOR | Post-visit summary (doctor also sees raw notes) |
 
 ### Calendar (`/calendar`)
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/calendar/connect` | JWT PATIENT/DOCTOR | Returns Google OAuth consent URL |
+| GET | `/calendar/callback` | Public | OAuth callback — exchanges code, encrypts tokens |
+| POST | `/calendar/disconnect` | JWT PATIENT/DOCTOR | Revokes token, deletes local record |
+| GET | `/calendar/status` | JWT PATIENT/DOCTOR | `{connected, connectedAt, googleEmail}` |
 
-| Method | Path | Auth | Notes |
-|---|---|---|---|
-| GET    | /calendar/connect    | JWT PATIENT,DOCTOR | returns `{redirectUrl}` for the browser to follow. Mints a single-use CSRF `state` stored under `oauth_state:{state}` in Redis with TTL 600s. |
-| GET    | /calendar/callback   | PUBLIC              | reached by Google's top-level browser GET after consent. State validated against Redis (consumed on use — replay attacker reusing the URL gets a 400), reconstructs the user identity from the matched state payload, and calls `OAuth2Client.getToken(code)` to exchange the code for tokens, AES-256-GCM encrypts, upserts `OauthToken`, returns HTML stub + optional `FRONTEND_OAUTH_RETURN_URL` redirect. |
-| POST   | /calendar/disconnect | JWT PATIENT,DOCTOR | best-effort `revokeToken`, deletes the local `OauthToken` row regardless. |
-| GET    | /calendar/status     | JWT PATIENT,DOCTOR | returns `{connected, connectedAt, googleEmail}`. |
+---
 
-## DB schema summary
+## Database Schema
 
-13 models, 10 enums on PostgreSQL (Neon). Times stored/compared in UTC.
+13 models on PostgreSQL (Neon). All times stored in UTC.
 
-| Model | Purpose | Key fields / constraints |
-|---|---|---|
-| `User`                | account row            | `id`, `email` @unique, `passwordHash` (argon2id), `role` ∈ {PATIENT, DOCTOR, ADMIN} |
-| `DoctorProfile`       | doctor clinical profile| `userId` @unique FK→User, `specialisation`, `workingHours` JSON, `slotDurationMinutes` (default 30), `phone` |
-| `PatientProfile`      | patient profile        | `userId` @unique FK→User, `fullName`, `gender?`, `dob?` |
-| `LeaveDay`            | Rule 3                 | `doctorId` FK, `leaveDate` Date — `@@unique([doctorId, leaveDate])` |
-| `Booking`             | Rule 2 row             | `doctorId`, `patientId`, `bookingDate`, `startTime`, `status` ∈ {CONFIRMED, RESCHEDULED, CANCELLED, COMPLETED} — **`@@unique([doctorId, bookingDate, startTime])`** plus the partial-WHERE index R1 in `001_add_partial_unique_index/migration.sql` (admits CANCELLED/COMPLETED rows for slot reuse) |
-| `SymptomForm`         | Rule 4 intake          | `bookingId` @unique, `primaryComplaint`, `durationDays`, `severity`, `description`, `currentMedications[]`, `allergies[]` |
-| `PreVisitSummary`     | M4 LLM output          | `bookingId` @unique, `summaryText`, `llmStatus` ∈ {PENDING, GENERATED, FALLBACK, FAILED}, `retryCount`, `generatedAt` |
-| `PostVisitSummary`    | M4 LLM output          | `bookingId` @unique, `summaryText`, `llmStatus`, `retryCount`, `generatedAt`, `doctorNotes?` |
-| `Prescription`        | M5 reminder source    | `bookingId` FK, `medicationName`, `frequency` (enum), `frequencyCustom?` |
-| `MedicationReminder`  | Rule 7 row             | `prescriptionId` FK, `remindAt` DateTime, `status` ∈ {PENDING, SENT, SKIPPED} |
-| `Notification`        | Rule 6 durable audit   | `recipientUserId` FK→User, `bookingId`, `notificationType`, `status` ∈ {QUEUED, SENDING, SENT, RETRYING, FAILED, DEAD}, `failedAt?` (dead-letter timestamp), `lastError` |
-| `CalendarEvent`       | Rule 8 audit           | `bookingId` @unique, `patientEventId?`, `doctorEventId?`, `syncStatus` ∈ {PENDING, SYNCING, SYNCED, RETRYING, FAILED}, `lastSyncError` |
-| `OauthToken`          | M6 tokens at rest      | `userId` @unique, `accessToken` (AES-256-GCM `base64(iv ‖ ciphertext ‖ tag)`), `refreshToken` (same format), `expiryDate`, `googleEmail` |
-| `RefreshToken`        | M1 JWT rotation        | `userId` FK, `tokenHash` @unique (hashed), `familyId`, `revokedAt?` — reuse-detection on rotation |
+| Model | Purpose | Key Constraints |
+|-------|---------|-----------------|
+| `User` | Auth account | `email` unique, `role` ∈ {PATIENT, DOCTOR, ADMIN} |
+| `DoctorProfile` | Clinical profile | `userId` unique FK, `workingHours` JSON, `slotDurationMinutes` |
+| `PatientProfile` | Patient profile | `userId` unique FK, `fullName`, `dob`, `gender` |
+| `LeaveDay` | Doctor leave | `@@unique([doctorId, leaveDate])` |
+| `Booking` | Core appointment | `@@unique([doctorId, bookingDate, startTime])` + partial index `WHERE status IN ('CONFIRMED','RESCHEDULED')` |
+| `SymptomForm` | Pre-visit intake | `bookingId` unique FK |
+| `PreVisitSummary` | LLM output | `llmStatus` ∈ {PENDING, GENERATED, FALLBACK, FAILED} |
+| `PostVisitSummary` | LLM output | `doctorNotes` field visible to doctor only |
+| `Prescription` | Medication record | `bookingId` FK, `frequency` enum |
+| `MedicationReminder` | Scheduled reminders | `remindAt` stored in DB (survives Redis eviction) |
+| `Notification` | Email audit trail | `status` ∈ {QUEUED, SENDING, SENT, RETRYING, FAILED, DEAD} + `failedAt` |
+| `CalendarEvent` | Calendar audit | `syncStatus` ∈ {PENDING, SYNCED, RETRYING, FAILED} |
+| `OauthToken` | Google tokens | AES-256-GCM encrypted at rest |
 
-## LLM prompts (exact text from `backend/src/services/llm/llmService.ts`)
+---
 
-The NVIDIA NIM client is wired via the `openai` SDK pointing at
-`https://integrate.api.nvidia.com/v1`. Both prompts return JSON validated by
-`zod`; on parse/schema failure or transport error the worker retries once
-with a 2s backoff, then stores a neutral fallback in `summaryText` with
-`llmStatus=FALLBACK` (Rule 5). Worker concurrency is locked to **1** to stay
-inside NIM's ~40 req/min free-tier limit.
+## LLM Prompts
 
-### Pre-visit (system)
+Both prompts call NVIDIA NIM via the `openai` SDK at `https://integrate.api.nvidia.com/v1`. Responses are validated with `zod`; on failure: 1 retry (2s backoff) → neutral fallback stored in DB. Booking confirm **never** awaits the LLM.
+
+### Pre-Visit Summary (system prompt)
 
 ```
 You are a clinical decision-support assistant. You analyse patient symptom
-information and produce a brief pre-visit summary that helps the doctor
-prepare. You are NOT a diagnostic device. Do not suggest a definitive
-diagnosis. Keep all content neutral and factual. Do not mention the patient's
-name, contact information, or identifiers — the intake is already anonymous.
+information and produce a brief pre-visit summary that helps the doctor prepare.
+You are NOT a diagnostic device. Do not suggest a definitive diagnosis. Keep all
+content neutral and factual. Do not mention the patient's name, contact
+information, or identifiers — the intake is already anonymous.
 
-Return ONLY a JSON object with the keys shown below. Do not emit reasoning,
-introduction, summary, or commentary. No Markdown fences. The JSON must be
-valid and complete on its own.
+Return ONLY a JSON object with the keys shown below. No Markdown fences.
 ```
 
-### Pre-visit (user template — `{symptoms}` is replaced with `buildPreVisitSymptomText(symptomForm)`)
-
+### Pre-Visit Summary (user prompt)
 ```
 Analyse these symptoms and return: urgency level (Low / Medium / High),
 chief complaint, and three suggested questions for the doctor.
@@ -263,35 +292,16 @@ Return the result as a JSON object with exactly this schema:
   "suggestedQuestions": [string, string, string] }
 
 Rules:
-- "urgencyLevel": MUST be one of "Low", "Medium", "High" — no other values.
+- "urgencyLevel": MUST be one of "Low", "Medium", "High".
 - "chiefComplaint": one concise sentence, max 200 chars.
-- "suggestedQuestions": EXACTLY three items, each a single question, max 200 chars each.
-- The JSON object is your entire answer. No preamble, no postamble, no Markdown code fences.
+- "suggestedQuestions": EXACTLY three items, each max 200 chars.
+- The JSON object is your entire answer. No preamble, no Markdown fences.
 
 Symptoms:
 {symptoms}
 ```
 
-The `buildPreVisitSymptomText` helper only references SymptomForm fields
-(`primaryComplaint`, `durationDays`, `severity`, `description`,
-`currentMedications`, `allergies`). No patient/doctor name, email, id, or DOB
-is sent to NIM (PII minimisation, M4 verified).
-
-### Post-visit (system)
-
-```
-You are a health-literacy assistant. You convert a doctor's visit notes into
-a plain-language summary that the patient can understand. Replace jargon with
-everyday words where possible but do not invent medical facts or medication
-instructions that are not present in the notes. If something is absent, omit
-it rather than guessing.
-
-Return ONLY a JSON object with the keys shown below. No Markdown fences, no
-commentary outside the JSON.
-```
-
-### Post-visit (user template — `{notes}` is the doctor's raw notes)
-
+### Post-Visit Summary (user prompt)
 ```
 Convert these clinical notes into a patient-friendly summary with medication
 schedule and follow-up steps.
@@ -305,153 +315,113 @@ Return the result as a JSON object with exactly this schema:
 
 Rules:
 - "summaryText": 1-3 plain-language paragraphs, each max 600 chars.
-- "medicationSchedule": one entry per medication mentioned in the notes; if
-  none mentioned, use an empty array []. Each "schedule" string should be the
-  patient-readable instructions (e.g. "Take 1 tablet every morning after food").
-- "followUpSteps": one string per distinct follow-up action mentioned; if
-  none, use []. Each string max 300 chars.
-- The JSON object is your entire answer. No Markdown fences, no preamble.
+- "medicationSchedule": one entry per medication; [] if none mentioned.
+- "followUpSteps": one string per distinct action; [] if none.
+- The JSON object is your entire answer. No Markdown fences.
 
 Notes:
 {notes}
 ```
 
-## Google Calendar OAuth setup — end to end
+**PII minimization**: only `SymptomForm` fields (complaint, duration, severity, medications, allergies) are sent to NIM. Patient name, email, DOB, and IDs are never included in the prompt.
 
-M6 uses `googleapis@^144` with scope
-`https://www.googleapis.com/auth/calendar.events` only (least-privilege — read
-and write **events** on the user's primary calendar, nothing else).
+---
 
-### Step 1 — GCP project + enabling Calendar API
+## Google Calendar OAuth Setup
 
-1. https://console.cloud.google.com → **New Project** (e.g. `healthcare-app`).
-2. APIs & Services → Library → search **Google Calendar API** → **Enable**.
+The app uses `googleapis@^144` with scope `calendar.events` only (least-privilege).
 
-### Step 2 — OAuth consent screen
+**Step 1 — Create GCP project**
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) → New Project
+2. APIs & Services → Library → Enable **Google Calendar API**
 
-1. APIs & Services → **OAuth consent screen** → User type **External** → **Create**.
-2. Fill in the app name, support email, authorised domains (your Neon-free
-   app's domain). Leave scopes for now — M6 only requests `calendar.events`
-   at runtime.
-3. **Test users** → ADD USERS → add your Google account's email.
-   This is critical because the app stays in "Testing" status. Without test
-   users, anyone outside your organisation sees
-   **"This app isn't verified"** with the only path forward being the
-   *Developer wants you to continue / Advanced / Go to <app> (unsafe)* bypass.
-   The bypass works but is a hostile UX — adding yourself as a test user
-   makes the warning go away and the consent screen proceeds normally for
-   your own development account.
+**Step 2 — OAuth consent screen**
+1. APIs & Services → OAuth consent screen → External → Create
+2. Add your app name and authorized domains
+3. **Add your Google email under Test Users** — without this, every consent screen shows an "unverified app" warning
 
-### Step 3 — OAuth 2.0 web client credentials
+**Step 3 — Create OAuth 2.0 credentials**
+1. APIs & Services → Credentials → Create Credentials → OAuth client ID → Web application
+2. Add authorized redirect URIs:
+   - `http://localhost:3001/calendar/callback` (dev)
+   - `https://your-backend.onrender.com/calendar/callback` (prod)
+3. Copy Client ID and Client Secret to your `.env`
 
-1. APIs & Services → **Credentials** → **Create Credentials** → **OAuth client ID**
-2. Application type: **Web application**.
-3. Authorised redirect URIs (must match `GOOGLE_OAUTH_REDIRECT_URI` exactly,
-   host + port + path + scheme): add `http://localhost:3001/calendar/callback`
-   for dev and `https://your-backend.onrender.com/calendar/callback` for prod.
-4. Copy the **Client ID** (ends `.apps.googleusercontent.com`) and
-   **Client Secret** (`GOCSPX-…`) into your `.env` as
-   `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`.
-
-### Step 4 — Encryption key
-
-Generate the AES-256-GCM key for OAuth tokens-at-rest:
-
+**Step 4 — Generate encryption key**
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+# Paste output as OAUTH_TOKEN_ENC_KEY
 ```
 
-Store the output in `OAUTH_TOKEN_ENC_KEY`. `config/env.ts:25-32` validates at
-boot that the base64 string decodes to exactly 32 raw bytes.
+**How the flow works:**
+1. User hits `GET /calendar/connect` → backend mints a single-use CSRF `state` token (Redis, 60s TTL), returns Google consent URL
+2. User grants `calendar.events` scope → Google redirects to `/calendar/callback`
+3. Backend validates state (consumed on use — replay attacks get 400), exchanges code for tokens, AES-256-GCM encrypts, stores in `OauthToken`
+4. On booking confirm/cancel/reschedule: calendar jobs enqueued via BullMQ post-commit, processed by `calendarSyncWorker` (concurrency 2 — within Google's 200 req/user/100s quota)
+5. If user revokes access via Google Account settings: `invalid_grant` → local `OauthToken` row deleted → worker silently skips (booking unaffected)
 
-### Step 5 — End-to-end flow (what actually happens)
+---
 
-1. Authenticated patient or doctor hits `GET /calendar/connect` in the app's
-   Settings page. Backend mints a single-use CSRF `state`, stores it in
-   Upstash Redis under `oauth_state:{state}` with TTL 600s, and returns the
-   Google consent URL.
-2. Browser is redirected to Google. User picks their Google account and
-   grants `calendar.events` scope. Google redirects to
-   `https://<your backend>/calendar/callback?code=...&state=...`. This
-   redirect is **public** because Google does it top-level in the browser.
-3. `GET /calendar/callback` validates the `state` against Redis (consuming it
-   immediately, so a replay attacker reusing the URL gets a 400), reconstructs
-   the user identity from the matched state payload, and calls
-   `OAuth2Client.getToken(code)` to exchange the code for `{access_token,
-   refresh_token, expiry_date, ...}`.
-4. Tokens are AES-256-GCM encrypted: ciphertext stored as
-   `base64(iv(12) ‖ ciphertext ‖ tag(16))` in `OauthToken.accessToken` and
-   `.refreshToken`. The `OauthToken` row is keyed on `userId`.
-5. From then on, every booking confirm / cancel / reschedule enqueues a
-   `calendar-sync` BullMQ job. The worker re-reads the booking + connected
-   parties from the DB at execute time (never trusts pre-commit snapshot),
-   calls `getValidAccessToken(userId)` to decrypt/refresh-on-demand (with a
-   `oauth_refresh_lock:{userId}` SET-NX serialisation to avoid concurrent
-   refresh stampedes), and then `calendar.events.insert` or
-   `calendar.events.delete` with `sendUpdates:'none'` (no invite emails to
-   either party).
-6. If the user revokes our app from their Google account security page,
-   `getValidAccessToken` catches `invalid_grant`, deletes the `OauthToken`
-   row locally, and returns `null` — the worker silently skips Google
-   sync for that user without breaking the booking response (Rule 8).
-7. `POST /calendar/disconnect` revokes the token at Google (best-effort) and
-   deletes the `OauthToken` row.
+## Running the Test Suite
 
-### The "unverified app" warning
-
-Even after you add yourself as a test user (Step 2), other people will see
-the "Google hasn't verified this app" warning during consent. The app's
-status remains *Testing* by default. Three deployment options:
-
-- **Dev / personal / demo**: leave it in Testing, add each new user's Google
-  email under "Test users". 100 test-user cap — fine for a placement demo.
-- **Production small-scale**: submit the app for Google verification. Google
-  will ask for a privacy policy URL + a short video of the consent flow. The
-  process takes a few days for sensitive scopes; `calendar.events` is usually
-  approved inside a week. Then the warning goes away for all users.
-- **Inside Google Workspace**: an organisation admin can mark the app
-  "internal" — no verification needed, the warning never shows for employees.
-
-For this placement assignment the "Testing + test users" path is sufficient.
-
-## Running the test suite
-
-The M8 suite runs against real Neon + Upstash (no mocks, no Docker). It
-covers Rules 1, 2, 3, 5, 6, 8 — including a 12-way simultaneous-failure mesh.
+Tests run against real Neon + Upstash (no mocks) and cover all non-negotiable rules.
 
 ```bash
 cd backend
-cp .env.example .env.test          # edit with real DATABASE_URL + UPSTASH_REDIS_TLS_URL
-# (see tests/README.md for the failure-injection pattern)
-npm test                            # 7 specs / 36 tests, ~7 min wall clock
-npm run test:race                   # TP-C1 only
-npm run test:rbac                   # TP-RB only
-# …etc, see package.json scripts
+cp .env.example .env.test
+# Set real DATABASE_URL + UPSTASH_REDIS_TLS_URL; use invalid values for NIM/Resend to test failure paths
+
+npm test              # All 7 specs / 36 tests (~7 min)
+npm run test:race     # Concurrent booking race (20 simultaneous requests → exactly 1 success)
+npm run test:rbac     # 15 RBAC boundary tests
+npm run test:leave    # Leave conflict detection + auto-cancel
+npm run test:llm      # LLM failure injection → FALLBACK state
+npm run test:email    # Email failure injection → DEAD state after 3 retries
+npm run test:calendar # Calendar silent-skip when no OAuth tokens
+npm run test:mixed    # All failures simultaneously on a 12-way race
 ```
 
-Flush the Redis daily-cap key before a fresh second run:
-`redis-cli -u $UPSTASH_REDIS_TLS_URL DEL email:daily_cap:$(date -u +%F)`
-(force `TZ=UTC` first — see assumption A10(M2-Correction-TZ) / A1(M8)).
+> Before re-running the suite, flush the email daily-cap Redis key:
+> ```bash
+> redis-cli -u $UPSTASH_REDIS_TLS_URL DEL email:daily_cap:$(TZ=UTC date +%F)
+> ```
 
-## Free-tier limits reference
+---
 
-| Service | Free quota in this project |
-|---|---|
-| Vercel Hobby | 100 GB bandwidth / mo, 100 GB-h build |
-| Render free Web Service | spins down after 15 min idle, cold-start 30-60s, 750 instance-hours / mo |
-| Neon free | scale-to-zero, 0.5 GB storage, 100 compute-hours / mo |
-| Upstash free | 256 MB, 500 K commands/day, 1 K-10 K req/s |
-| Resend free | 3 000 / mo + 100 / day across all send paths |
-| Google Calendar API v3 | 200 req/user/100s per user |
-| NVIDIA NIM free | ~40 req/min (worker cap is 1) |
+## System Design
 
-## Project state
+The full 800-word system design write-up is in [`SYSTEM_DESIGN.md`](./SYSTEM_DESIGN.md). It covers the four required topics:
 
-See `PROJECT_STATE.md` for the authoritative cross-module ledger: module
-status, regression ledger, tracked issues, assumptions log. **Read it before
-touching any module.**
+1. **Double-booking prevention** — DB partial unique index inside `prisma.$transaction`; Redis hold is advisory UX only
+2. **Doctor leave conflict handling** — Two-phase `dryRun` preview before commit; `AUTO_CANCEL` atomically cancels bookings and enqueues notifications in a single tx
+3. **Slot hold mechanism** — Redis `SET NX EX` keyed by `bh:{doctorId}:{date}:{time}`; 5-min TTL; booking insert re-checks DB constraint regardless of hold state
+4. **Notification failure handling** — BullMQ `email-notification` queue; 3× exponential retry; `DEAD` state with `failedAt` timestamp; booking confirm never awaits email
 
-## Known drifts / drift-watch (tracked in PROJECT_STATE.md)
+---
+
+## Free-Tier Limits Reference
+
+| Service | Quota used in this project |
+|---------|---------------------------|
+| Vercel Hobby | 100 GB bandwidth/mo, 100 GB-h build |
+| Render free | 750 instance-hours/mo, 15-min idle spin-down, 30-60s cold start |
+| Neon free | 0.5 GB storage, 100 compute-hours/mo, scale-to-zero |
+| Upstash free | 256 MB, 500K commands/day |
+| Resend free | 3,000 emails/mo, 100/day |
+| Google Calendar API | 200 req/user/100s (worker concurrency = 2) |
+| NVIDIA NIM free | ~40 req/min (LLM worker concurrency = 1) |
+
+Everything above is on a **permanent** free tier — no credit card, no expiry.
+
+---
+
+## Project State
+
+See `PROJECT_STATE.md` for the authoritative cross-module ledger: module status, regression ledger, tracked issues, assumptions log. **Read it before touching any module.**
+
+---
+
+## Known Drifts / Drift-Watch (tracked in PROJECT_STATE.md)
 
 1. **R1 (pending)** — partial-unique-index migration is raw SQL, not Prisma-tracked. Must be applied manually via `psql`.
 2. **I2(M4)** — admin cancel/reschedule bypass: `requireRoles('PATIENT','DOCTOR','ADMIN')` on routes but service-layer ownership check rejects admin's user id. Fix: add `req.user.role === 'ADMIN'` check in `cancelBooking`/`rescheduleBooking`.
