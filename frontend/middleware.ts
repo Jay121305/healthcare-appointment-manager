@@ -21,6 +21,7 @@ export function middleware(request: NextRequest) {
     pathname.startsWith('/signup') ||
     pathname.startsWith('/api/') ||
     pathname.startsWith('/_next/') ||
+    pathname.startsWith('/favicon') ||
     pathname.includes('.') ||
     pathname === '/'
   ) {
@@ -29,20 +30,23 @@ export function middleware(request: NextRequest) {
 
   const role = request.cookies.get('role')?.value as 'PATIENT' | 'DOCTOR' | 'ADMIN' | undefined;
 
-  if (!role) {
+  if (!role || !roleRoutes[role]) {
     // No role hint — redirect to login with original path preserved
-    const url = new URL('/login', request.url);
+    const url = request.nextUrl.clone();
+    url.pathname = '/login';
     url.searchParams.set('redirect', pathname);
     return NextResponse.redirect(url);
   }
 
-  const allowedPrefixes = roleRoutes[role] ?? [];
+  const allowedPrefixes = roleRoutes[role];
   const hasAccess = allowedPrefixes.some((prefix) => pathname.startsWith(prefix));
 
   if (!hasAccess) {
     // Role doesn't match — bounce to the correct dashboard
-    const dashboard = allowedPrefixes[0] ?? '/login';
-    return NextResponse.redirect(new URL(dashboard, request.url));
+    const url = request.nextUrl.clone();
+    url.pathname = allowedPrefixes[0];
+    url.search = '';
+    return NextResponse.redirect(url);
   }
 
   return NextResponse.next();
