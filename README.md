@@ -2,8 +2,8 @@
 
 > A production-grade, full-stack clinic platform with separate portals for patients, doctors, and admins — featuring AI-generated pre/post-visit summaries, concurrent-safe slot booking, async email notifications, and Google Calendar sync. Runs entirely on permanent free-tier infrastructure.
 
-**Live Demo → `https://healthcare-appointment-manager-two.vercel.app`**  
-**Backend API → `https://healthcare-backend-dz7o.onrender.com`**
+**Live Demo → [https://healthcare-appointment-manager-two.vercel.app](https://healthcare-appointment-manager-two.vercel.app)**  
+**Backend API → [https://healthcare-backend-dz7o.onrender.com](https://healthcare-backend-dz7o.onrender.com)**
 
 Seed accounts for evaluators:
 | Role    | Email                      | Password        |
