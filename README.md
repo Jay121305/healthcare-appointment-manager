@@ -34,6 +34,18 @@ Seed accounts for evaluators:
 
 ![Doctor Sign In](docs/screenshots/doctor-signin.png)
 
+**Admin Dashboard**
+
+![Admin Dashboard](docs/screenshots/admin-dashboard.png)
+
+**Patient Dashboard**
+
+![Patient Dashboard](docs/screenshots/patient-dashboard.png)
+
+**Doctor Dashboard**
+
+![Doctor Dashboard](docs/screenshots/doctor-dashboard.png)
+
 ---
 
 ## What This Project Demonstrates
